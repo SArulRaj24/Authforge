@@ -16,22 +16,47 @@ public class SecurityConfig {
         return new BCryptPasswordEncoder(12);
     }
 
-    @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http)
-            throws Exception {
+//    @Bean
+//    public SecurityFilterChain securityFilterChain(HttpSecurity http)
+//            throws Exception {
+//
+//        http
+//                .csrf(csrf -> csrf.disable())
+//
+//                .sessionManagement(session -> session
+//                        .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+//                )
+//
+//                .authorizeHttpRequests(auth -> auth
+//                        .requestMatchers("/api/v1/auth/register").permitAll()
+//                        .anyRequest().authenticated()
+//                );
+//
+//        return http.build();
+//    }
+@Bean
+public SecurityFilterChain securityFilterChain(HttpSecurity http)
+        throws Exception {
 
-        http
-                .csrf(csrf -> csrf.disable())
+    http
+            .csrf(csrf -> csrf.disable())
 
-                .sessionManagement(session -> session
-                        .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
-                )
+            .sessionManagement(session -> session
+                    .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+            )
 
-                .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/v1/auth/register").permitAll()
-                        .anyRequest().authenticated()
-                );
+            .authorizeHttpRequests(auth -> auth
+                    .requestMatchers(
+                            "/api/v1/auth/register",
+                            "/api/v1/auth/login"
+                    ).permitAll()
+                    .anyRequest().authenticated()
+            )
 
-        return http.build();
-    }
+            .oauth2ResourceServer(oauth2 -> oauth2
+                    .jwt(jwt -> {})
+            );
+
+    return http.build();
+}
 }

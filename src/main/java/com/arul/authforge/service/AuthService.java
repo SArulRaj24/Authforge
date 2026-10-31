@@ -1,5 +1,8 @@
+
 package com.arul.authforge.service;
 
+import com.arul.authforge.dto.LoginRequest;
+import com.arul.authforge.dto.LoginResponse;
 import com.arul.authforge.dto.RegisterRequest;
 import com.arul.authforge.dto.RegisterResponse;
 import com.arul.authforge.entity.Role;
@@ -7,6 +10,8 @@ import com.arul.authforge.entity.User;
 import com.arul.authforge.repository.RoleRepository;
 import com.arul.authforge.repository.UserRepository;
 
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,42 +26,51 @@ public class AuthService {
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
+    private final JwtService jwtService;
+    private final RefreshTokenService refreshTokenService;
 
-    public AuthService(UserRepository userRepository,
-                       RoleRepository roleRepository,
-                       PasswordEncoder passwordEncoder) {
+    // Constructor injection
+    public AuthService(
+            UserRepository userRepository,
+            RoleRepository roleRepository,
+            PasswordEncoder passwordEncoder,
+            JwtService jwtService,
+            RefreshTokenService refreshTokenService) {
+
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.passwordEncoder = passwordEncoder;
+        this.jwtService = jwtService;
+        this.refreshTokenService = refreshTokenService;
     }
 
+    // User registration
     @Transactional
     public RegisterResponse register(RegisterRequest request) {
 
-        // 1. Normalize the email address
         String email = request.getEmail()
                 .trim()
                 .toLowerCase(Locale.ROOT);
 
-        // 2. Check whether the email already exists
+        // Check whether the email already exists
         if (userRepository.existsByEmail(email)) {
             throw new IllegalArgumentException(
                     "An account with this email already exists"
             );
         }
 
-        // 3. Hash the password
+        // Hash the password before storing it
         String hashedPassword =
                 passwordEncoder.encode(request.getPassword());
 
-        // 4. Create the user
+        // Create user
         User user = new User(
                 email,
                 hashedPassword,
                 request.getFullName().trim()
         );
 
-        // 5. Find and assign the default role
+        // Assign default ROLE_USER
         Role userRole = roleRepository.findByName("ROLE_USER")
                 .orElseThrow(() -> new IllegalStateException(
                         "Default ROLE_USER was not found in the database"
@@ -64,10 +78,10 @@ public class AuthService {
 
         user.addRole(userRole);
 
-        // 6. Save the user
+        // Save user
         User savedUser = userRepository.save(user);
 
-        // 7. Convert entity into a safe response DTO
+        // Extract assigned role names
         Set<String> roleNames = savedUser.getRoles()
                 .stream()
                 .map(Role::getName)
@@ -78,6 +92,52 @@ public class AuthService {
                 savedUser.getFullName(),
                 savedUser.getEmail(),
                 roleNames
+        );
+    }
+
+    // User login
+    @Transactional
+    public LoginResponse login(LoginRequest request) {
+
+        String email = request.getEmail()
+                .trim()
+                .toLowerCase(Locale.ROOT);
+
+        // Find user by email
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new BadCredentialsException(
+                        "Invalid email or password"
+                ));
+
+        // Check account status
+        if (!user.isEnabled()) {
+            throw new DisabledException("Account is disabled");
+        }
+
+        // Verify password against BCrypt hash
+        if (!passwordEncoder.matches(
+                request.getPassword(),
+                user.getPasswordHash())) {
+
+            throw new BadCredentialsException(
+                    "Invalid email or password"
+            );
+        }
+
+        // Generate JWT access token
+        String accessToken =
+                jwtService.generateAccessToken(user);
+
+        // Generate and persist refresh token hash
+        String refreshToken =
+                refreshTokenService.createRefreshToken(user);
+
+        // Return both tokens
+        return new LoginResponse(
+                accessToken,
+                refreshToken,
+                "Bearer",
+                jwtService.getAccessTokenTtl()
         );
     }
 }
