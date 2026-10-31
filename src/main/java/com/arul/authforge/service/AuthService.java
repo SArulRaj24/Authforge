@@ -9,6 +9,7 @@ import com.arul.authforge.entity.Role;
 import com.arul.authforge.entity.User;
 import com.arul.authforge.repository.RoleRepository;
 import com.arul.authforge.repository.UserRepository;
+import com.arul.authforge.dto.RefreshRequest;
 
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.DisabledException;
@@ -140,4 +141,42 @@ public class AuthService {
                 jwtService.getAccessTokenTtl()
         );
     }
+
+
+    // Refresh access token and rotate refresh token
+    @Transactional(noRollbackFor = RefreshTokenReuseException.class)
+    public LoginResponse refresh(RefreshRequest request) {
+
+        // Validate the old refresh token and rotate it
+        RefreshTokenService.RotationResult result =
+                refreshTokenService.rotateRefreshToken(
+                        request.getRefreshToken()
+                );
+
+        User user = result.user();
+
+        // Generate a fresh JWT access token
+        String accessToken =
+                jwtService.generateAccessToken(user);
+
+        // Return the new access token and replacement refresh token
+        return new LoginResponse(
+                accessToken,
+                result.rawToken(),
+                "Bearer",
+                jwtService.getAccessTokenTtl()
+        );
+    }
+
+
+    // User logout
+    @Transactional
+    public void logout(RefreshRequest request) {
+
+        refreshTokenService.revokeRefreshToken(
+                request.getRefreshToken()
+        );
+    }
+
+
 }
