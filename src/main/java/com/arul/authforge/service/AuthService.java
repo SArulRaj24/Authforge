@@ -178,5 +178,72 @@ public class AuthService {
         );
     }
 
+    @Transactional
+    public LoginResponse loginWithGoogle(
+            String googleSubject,
+            String email,
+            String fullName,
+            boolean emailVerified) {
+
+        if (!emailVerified) {
+            throw new IllegalArgumentException(
+                    "Google email must be verified");
+        }
+
+        if (googleSubject == null || googleSubject.isBlank()
+                || email == null || email.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Required Google account information is missing");
+        }
+
+        String normalizedEmail =
+                email.trim().toLowerCase(Locale.ROOT);
+
+        User user = userRepository
+                .findByGoogleSubject(googleSubject)
+                .orElse(null);
+
+        if (user == null) {
+
+            if (userRepository.existsByEmail(normalizedEmail)) {
+                throw new IllegalArgumentException(
+                        "An account with this email already exists. "
+                                + "Sign in using the existing login method first.");
+            }
+
+            Role userRole = roleRepository.findByName("ROLE_USER")
+                    .orElseThrow(() -> new IllegalStateException(
+                            "Default ROLE_USER was not found"));
+
+            user = new User(
+                    normalizedEmail,
+                    null,
+                    fullName == null || fullName.isBlank()
+                            ? "Google User"
+                            : fullName.trim()
+            );
+
+            user.setProvider("GOOGLE");
+            user.setGoogleSubject(googleSubject);
+            user.addRole(userRole);
+
+            user = userRepository.save(user);
+        }
+
+        if (!user.isEnabled()) {
+            throw new IllegalStateException("Account is disabled");
+        }
+
+        String accessToken = jwtService.generateAccessToken(user);
+        String refreshToken =
+                refreshTokenService.createRefreshToken(user);
+
+        return new LoginResponse(
+                accessToken,
+                refreshToken,
+                "Bearer",
+                jwtService.getAccessTokenTtl()
+        );
+    }
 
 }
