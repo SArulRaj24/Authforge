@@ -34,3 +34,5 @@ build/
 
 
 src/main/resources/application.properties
+
+authforge-frontend/node_modules
