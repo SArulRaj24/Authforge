@@ -16,6 +16,7 @@ import java.security.SecureRandom;
 import java.time.OffsetDateTime;
 import java.util.Base64;
 import java.util.HexFormat;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -78,7 +79,7 @@ public class RefreshTokenService {
                         "Invalid refresh token"
                 ));
 
-        // Reuse detection
+        // Detect reuse of an already-revoked token
         if (oldToken.isRevoked()) {
 
             revokeTokenFamily(oldToken.getFamilyId());
@@ -86,7 +87,7 @@ public class RefreshTokenService {
             throw new RefreshTokenReuseException();
         }
 
-        // Expiry validation
+        // Validate token expiry
         if (oldToken.getExpiresAt().isBefore(OffsetDateTime.now())) {
 
             throw new BadCredentialsException(
@@ -96,13 +97,13 @@ public class RefreshTokenService {
 
         User user = oldToken.getUser();
 
-        // Preserve the original family ID
+        // Preserve the original token family
         UUID familyId = oldToken.getFamilyId();
 
-        // Create the replacement token
+        // Create replacement token
         String newRawToken = createRefreshToken(user, familyId);
 
-        // Find the newly created entity
+        // Find the newly created token entity
         RefreshToken newToken = refreshTokenRepository
                 .findByTokenHash(hashToken(newRawToken))
                 .orElseThrow(() -> new IllegalStateException(
@@ -118,7 +119,7 @@ public class RefreshTokenService {
         return new RotationResult(user, newRawToken);
     }
 
-    // Revoke every token belonging to the same family
+    // Revoke every active token belonging to the same family
     private void revokeTokenFamily(UUID familyId) {
 
         OffsetDateTime now = OffsetDateTime.now();
@@ -150,6 +151,12 @@ public class RefreshTokenService {
     // Store only the SHA-256 hash in the database
     public String hashToken(String rawToken) {
 
+        if (rawToken == null || rawToken.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Refresh token cannot be empty"
+            );
+        }
+
         try {
             MessageDigest digest =
                     MessageDigest.getInstance("SHA-256");
@@ -171,31 +178,44 @@ public class RefreshTokenService {
         }
     }
 
-    // Result returned to AuthService
+    // Result returned to AuthService during rotation
     public record RotationResult(
             User user,
             String rawToken
     ) {}
 
-
     // Revoke a refresh token during logout
+    // Return the user ID only when revocation succeeds
     @Transactional
-    public void revokeRefreshToken(String rawToken) {
+    public Optional<Long> revokeRefreshToken(String rawToken) {
 
         if (rawToken == null || rawToken.isBlank()) {
-            return;
+            return Optional.empty();
         }
 
         String tokenHash = hashToken(rawToken);
 
-        refreshTokenRepository
-                .findByTokenHashForUpdate(tokenHash)
-                .ifPresent(token -> {
-                    if (!token.isRevoked()) {
-                        token.revoke();
-                        refreshTokenRepository.save(token);
-                    }
-                });
-    }
+        Optional<RefreshToken> optionalToken =
+                refreshTokenRepository.findByTokenHashForUpdate(tokenHash);
 
+        if (optionalToken.isEmpty()) {
+            return Optional.empty();
+        }
+
+        RefreshToken token = optionalToken.get();
+
+        // Do not treat an already-revoked token as a successful logout
+        if (token.isRevoked()) {
+            return Optional.empty();
+        }
+
+        // Capture user ID before returning
+        Long userId = token.getUser().getId();
+
+        token.revoke();
+
+        refreshTokenRepository.save(token);
+
+        return Optional.of(userId);
+    }
 }

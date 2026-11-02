@@ -25,6 +25,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.util.Locale;
 import java.util.Set;
 import java.util.stream.Collectors;
+import com.arul.authforge.exception.DuplicateEmailException;
 
 @Service
 public class AuthService {
@@ -83,7 +84,7 @@ public class AuthService {
 
         // Check whether email already exists
         if (userRepository.existsByEmail(email)) {
-            throw new IllegalArgumentException(
+            throw new DuplicateEmailException(
                     "An account with this email already exists"
             );
         }
@@ -243,16 +244,18 @@ public class AuthService {
     @Transactional
     public void logout(RefreshRequest request) {
 
-        // Revoke the supplied refresh token
-        refreshTokenService.revokeRefreshToken(
+        // Revoke the refresh token and retrieve its owner's ID
+        var revokedUserId = refreshTokenService.revokeRefreshToken(
                 request.getRefreshToken()
         );
 
-        // Record logout request
-        auditService.logEvent(
-                null,
-                "LOGOUT",
-                "Logout request processed"
+        // Record logout only when token revocation succeeds
+        revokedUserId.ifPresent(userId ->
+                auditService.logEvent(
+                        userId,
+                        "LOGOUT",
+                        "User successfully logged out"
+                )
         );
     }
 
@@ -266,8 +269,9 @@ public class AuthService {
 
         // Verify Google email
         if (!emailVerified) {
-            throw new IllegalArgumentException(
-                    "Google email must be verified"
+            throw new DuplicateEmailException(
+                    "An account with this email already exists. "
+                            + "Sign in using the existing login method first."
             );
         }
 
